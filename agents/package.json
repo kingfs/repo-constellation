@@ -1,0 +1,15 @@
+{
+  "name": "repo-constellation-agents",
+  "private": true,
+  "version": "0.1.0",
+  "description": "agent-compose agents that mirror and curate GitHub stars",
+  "type": "commonjs",
+  "scripts": {
+    "sync": "node scripts/sync-stars.cjs",
+    "curate": "node scripts/curate-stars.cjs",
+    "test": "node --test test/*.test.cjs"
+  },
+  "dependencies": {
+    "@chaitin-ai/agent-compose-runtime-sdk": "0.8.0"
+  }
+}

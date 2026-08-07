@@ -1,0 +1,93 @@
+name: repo-constellation
+
+agents:
+  star-sync:
+    provider: codex
+    image: ${AGENT_IMAGE}
+    driver:
+      docker: {}
+    env:
+      GITHUB_TOKEN:
+        value: ${GITHUB_TOKEN}
+        secret: true
+      PLATFORM_API_URL: ${PLATFORM_API_URL}
+      PLATFORM_AGENT_TOKEN:
+        value: ${PLATFORM_AGENT_TOKEN}
+        secret: true
+      COLLECTOR_REFRESH_LIMIT: "1500"
+      COLLECTOR_REFRESH_CONCURRENCY: "5"
+    scheduler:
+      enabled: true
+      sandbox_policy: sticky
+      script:
+        provider: file
+        path: ./agents/schedulers/sync-stars.js
+
+  star-sync-control:
+    provider: codex
+    image: ${AGENT_IMAGE}
+    driver:
+      docker: {}
+    env:
+      GITHUB_TOKEN:
+        value: ${GITHUB_TOKEN}
+        secret: true
+      PLATFORM_API_URL: ${PLATFORM_API_URL}
+      PLATFORM_AGENT_TOKEN:
+        value: ${PLATFORM_AGENT_TOKEN}
+        secret: true
+      COLLECTOR_REFRESH_LIMIT: "1500"
+      COLLECTOR_REFRESH_CONCURRENCY: "5"
+    scheduler:
+      enabled: true
+      sandbox_policy: sticky
+      script:
+        provider: file
+        path: ./agents/schedulers/sync-control.js
+
+  star-curator:
+    provider: codex
+    model: ${AGENT_MODEL}
+    image: ${AGENT_IMAGE}
+    driver:
+      docker: {}
+    env:
+      AGENT_PROVIDER: ${AGENT_PROVIDER}
+      AGENT_MODEL: ${AGENT_MODEL}
+      ANALYSIS_VERSION: ${ANALYSIS_VERSION}
+      CURATOR_BATCH_SIZE: ${CURATOR_BATCH_SIZE}
+      CURATOR_LOCAL_MAX_CONCURRENCY: ${CURATOR_LOCAL_MAX_CONCURRENCY}
+      CURATOR_JOB_TIMEOUT_MS: ${CURATOR_JOB_TIMEOUT_MS}
+      CURATOR_IDLE_EXIT_MS: "15000"
+      PLATFORM_API_URL: ${PLATFORM_API_URL}
+      PLATFORM_AGENT_TOKEN:
+        value: ${PLATFORM_AGENT_TOKEN}
+        secret: true
+    scheduler:
+      enabled: true
+      sandbox_policy: new
+      script:
+        provider: file
+        path: ./agents/schedulers/curate-stars.js
+
+  star-search:
+    provider: codex
+    model: ${AGENT_MODEL}
+    system_prompt: |
+      你是 Repo Constellation 的搜索 Agent。你只能推荐 Platform API 返回的项目，绝不凭记忆编造项目。
+      Platform API 地址只能读取环境变量 PLATFORM_API_URL，禁止使用 localhost。认证 token 只能读取 PLATFORM_AGENT_TOKEN。
+      搜索必须执行：curl -sS -X POST "$PLATFORM_API_URL/internal/v1/search/projects" -H "Authorization: Bearer $PLATFORM_AGENT_TOKEN" -H "Content-Type: application/json" --data '{"query":"检索词","filters":{},"sort":"relevance","limit":20}'。
+      获取详情必须 POST $PLATFORM_API_URL/internal/v1/projects/batch-get，README 使用 GET $PLATFORM_API_URL/internal/v1/projects/:id/readme，比较必须 POST $PLATFORM_API_URL/internal/v1/projects/compare；所有请求都必须带 Authorization header。
+      每次搜索必须先调用 search/projects；中文问题必须同时生成英文同义词。任何 HTTP 非 2xx 或空结果都要调整查询重试，不能把失败响应当成搜索结果。
+      对“AI 推理引擎/推理服务”类问题，至少检索：inference engine、LLM inference serving、vLLM、SGLang、llama.cpp、TensorRT-LLM。
+      候选不足时必须继续检索，再用 batch-get、readme 和 compare 核实用途。最终 JSON 中每个推荐必须包含 API 返回的 id/fullName 和匹配证据。
+    image: ${AGENT_IMAGE}
+    driver:
+      docker: {}
+    env:
+      AGENT_PROVIDER: ${AGENT_PROVIDER}
+      AGENT_MODEL: ${AGENT_MODEL}
+      PLATFORM_API_URL: ${PLATFORM_API_URL}
+      PLATFORM_AGENT_TOKEN:
+        value: ${PLATFORM_AGENT_TOKEN}
+        secret: true

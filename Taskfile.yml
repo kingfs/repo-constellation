@@ -1,0 +1,207 @@
+version: "3"
+
+dotenv:
+  - .env
+
+vars:
+  AGENT_COMPOSE: '{{default "agent-compose" .AGENT_COMPOSE}}'
+  AGENT_COMPOSE_HOST: '{{default "http://127.0.0.1:7410" .AGENT_COMPOSE_HOST}}'
+  AGENT_COMPOSE_GUEST_IMAGE: '{{default "chaitin/agent-compose-guest:latest" .AGENT_COMPOSE_GUEST_IMAGE}}'
+  AGENT_IMAGE: '{{default "repo-constellation-agent:local" .AGENT_IMAGE}}'
+  COMPOSE_FILE: agent-compose.yml
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+
+  image:agent:
+    aliases: [docker]
+    desc: Build the JavaScript agent guest image
+    cmds:
+      - >-
+        docker build
+        --build-arg AGENT_COMPOSE_GUEST_IMAGE={{.AGENT_COMPOSE_GUEST_IMAGE}}
+        --tag {{.AGENT_IMAGE}}
+        --file agents/Dockerfile
+        agents
+
+  start:
+    desc: Build and start the complete platform, then apply the agent project
+    cmds:
+      - task: platform:rebuild
+      - task: image:agent
+      - task: agent:login
+      - task: agent:apply
+
+  stop:
+    desc: Disable agent schedulers and stop all services
+    cmds:
+      - task: agent:down
+      - task: platform:down
+
+  quality:test:
+    aliases: [test]
+    desc: Run Agent, Platform API, and Web tests
+    cmds:
+      - node --test agents/test/*.test.cjs
+      - npm --prefix services/api test
+      - npm --prefix services/web test
+
+  quality:lint:
+    aliases: [lint]
+    desc: Check JavaScript syntax and repository whitespace
+    cmds:
+      - node --check agents/scripts/library.cjs
+      - node --check agents/scripts/sync-stars.cjs
+      - node --check agents/scripts/curate-stars.cjs
+      - node --check agents/scripts/control-runner.cjs
+      - node --check agents/schedulers/sync-stars.js
+      - node --check agents/schedulers/sync-control.js
+      - node --check agents/schedulers/curate-stars.js
+      - git diff --check
+
+  quality:validate:
+    aliases: [validate]
+    desc: Validate and normalize the agent-compose project
+    preconditions:
+      - sh: command -v {{.AGENT_COMPOSE}}
+        msg: 'agent-compose binary not found; pass AGENT_COMPOSE=/path/to/agent-compose'
+    env:
+      GITHUB_TOKEN: validation-placeholder
+      AGENT_PROVIDER: codex
+      AGENT_MODEL: validation-placeholder
+      ANALYSIS_VERSION: v1
+      CURATOR_BATCH_SIZE: "1"
+      CURATOR_LOCAL_MAX_CONCURRENCY: "4"
+      CURATOR_JOB_TIMEOUT_MS: "60000"
+      COLLECTOR_REFRESH_LIMIT: "1500"
+      COLLECTOR_REFRESH_CONCURRENCY: "5"
+      PLATFORM_API_URL: http://api:8080
+      PLATFORM_AGENT_TOKEN: validation-placeholder-token
+      AGENT_IMAGE: repo-constellation-agent:local
+    cmds:
+      - '{{.AGENT_COMPOSE}} --file {{.COMPOSE_FILE}} config --quiet'
+
+  quality:check:
+    aliases: [check]
+    desc: Run all local quality checks
+    cmds:
+      - task: quality:lint
+      - task: quality:test
+      - task: quality:validate
+      - npm --prefix services/api run lint
+      - npm --prefix services/api run build
+      - npm --prefix services/web run lint
+      - npm --prefix services/web run build
+
+  setup:deps:
+    aliases: [deps]
+    desc: Install locked service dependencies
+    cmds:
+      - npm --prefix services/api ci
+      - npm --prefix services/web ci
+
+  platform:up:
+    aliases: [platform-up]
+    desc: Start the Platform using existing local images
+    cmds:
+      - ./deploy/scripts/compose.sh up -d --wait
+
+  platform:rebuild:
+    desc: Build and start the Platform images
+    cmds:
+      - ./deploy/scripts/compose.sh up -d --build --wait
+
+  platform:down:
+    aliases: [platform-down]
+    desc: Stop the Platform infrastructure
+    cmds:
+      - ./deploy/scripts/compose.sh down
+
+  platform:smoke:
+    aliases: [platform-smoke]
+    desc: Run infrastructure and schema smoke tests
+    dir: deploy
+    cmds:
+      - ./scripts/compose-smoke.sh
+
+  platform:e2e:
+    aliases: [platform-e2e]
+    desc: Verify the real PostgreSQL/API/Indexer/Meilisearch/Web path
+    dir: deploy
+    cmds:
+      - 'PLATFORM_AGENT_TOKEN="$(./scripts/compose.sh exec -T api printenv PLATFORM_AGENT_TOKEN)" ./scripts/platform-e2e.sh'
+
+  ops:backup:
+    aliases: [platform-backup]
+    desc: Create a PostgreSQL custom-format backup
+    dir: deploy
+    cmds:
+      - ./scripts/backup.sh {{.CLI_ARGS}}
+
+  ops:restore-drill:
+    aliases: [platform-restore-drill]
+    desc: Restore a backup into an isolated temporary database and verify it
+    dir: deploy
+    cmds:
+      - ./scripts/restore-drill.sh {{.CLI_ARGS}}
+
+  ops:check:
+    aliases: [platform-operational-check]
+    desc: Compare active PostgreSQL repositories with live index documents
+    dir: deploy
+    cmds:
+      - './scripts/compose.sh exec -T api sh -c ''wget -qO- --header="Authorization: Bearer $ADMIN_TOKEN" http://127.0.0.1:8080/api/v1/admin/operations/status'''
+
+  search:evaluate:
+    aliases: [evaluate-search]
+    desc: Measure Recall@5, Recall@10 and MRR against a curated query set
+    cmds:
+      - node deploy/scripts/evaluate-search.cjs {{default "docs/search-evaluation.example.json" .CLI_ARGS}}
+
+  agent:config:
+    aliases: [config]
+    desc: Print the normalized project configuration
+    cmds:
+      - 'PLATFORM_AGENT_TOKEN="$(./deploy/scripts/compose.sh exec -T api printenv PLATFORM_AGENT_TOKEN)" {{.AGENT_COMPOSE}} --host {{.AGENT_COMPOSE_HOST}} --file {{.COMPOSE_FILE}} config'
+
+  agent:login:
+    desc: Authenticate the local CLI to the bundled agent-compose daemon
+    preconditions:
+      - sh: test -n "$AGENT_COMPOSE_AUTH_TOKEN"
+        msg: 'AGENT_COMPOSE_AUTH_TOKEN must be set in .env'
+    cmds:
+      - '{{.AGENT_COMPOSE}} --host {{.AGENT_COMPOSE_HOST}} auth login --token "$AGENT_COMPOSE_AUTH_TOKEN"'
+
+  agent:apply:
+    aliases: [up]
+    desc: Apply the project and enable schedulers
+    cmds:
+      - 'PLATFORM_AGENT_TOKEN="$(./deploy/scripts/compose.sh exec -T api printenv PLATFORM_AGENT_TOKEN)" {{.AGENT_COMPOSE}} --host {{.AGENT_COMPOSE_HOST}} --file {{.COMPOSE_FILE}} up'
+
+  agent:down:
+    aliases: [down]
+    desc: Stop the project and disable schedulers
+    cmds:
+      - '{{.AGENT_COMPOSE}} --host {{.AGENT_COMPOSE_HOST}} --file {{.COMPOSE_FILE}} down'
+
+  agent:sync:
+    aliases: [sync]
+    desc: Run GitHub stars synchronization now
+    cmds:
+      - 'PLATFORM_AGENT_TOKEN="$(./deploy/scripts/compose.sh exec -T api printenv PLATFORM_AGENT_TOKEN)" {{.AGENT_COMPOSE}} --host {{.AGENT_COMPOSE_HOST}} --file {{.COMPOSE_FILE}} run star-sync --command "node /opt/star-agent/scripts/sync-stars.cjs --source=manual"'
+
+  agent:curate:
+    aliases: [curate]
+    desc: Run the bounded adaptive repository curator now
+    cmds:
+      - 'PLATFORM_AGENT_TOKEN="$(./deploy/scripts/compose.sh exec -T api printenv PLATFORM_AGENT_TOKEN)" {{.AGENT_COMPOSE}} --host {{.AGENT_COMPOSE_HOST}} --file {{.COMPOSE_FILE}} run star-curator --command "node /opt/star-agent/scripts/curate-stars.cjs --drain --reconcile-analysis --max-runtime-seconds 510"'
+
+  agent:curate-all:
+    aliases: [curate-all]
+    desc: Run the bounded adaptive curator (compatibility alias)
+    cmds:
+      - ./deploy/scripts/connect-agent-network.sh
+      - 'PLATFORM_AGENT_TOKEN="$(./deploy/scripts/compose.sh exec -T api printenv PLATFORM_AGENT_TOKEN)" {{.AGENT_COMPOSE}} --host {{.AGENT_COMPOSE_HOST}} --file {{.COMPOSE_FILE}} run star-curator --command "node /opt/star-agent/scripts/curate-stars.cjs --drain --reconcile-analysis --max-runtime-seconds 510"'

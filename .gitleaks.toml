@@ -1,0 +1,10 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Documented placeholders and deterministic idempotency test fixtures"
+regexTarget = "match"
+regexes = [
+  '''replace-with-[a-z0-9-]+''',
+  '''reconcile-[0-9]+''',
+]

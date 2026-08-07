@@ -1,0 +1,148 @@
+name: repo-constellation
+
+services:
+  agent-compose:
+    image: ${AGENT_COMPOSE_IMAGE:-chaitin/agent-compose:v2608.2.0}
+    environment:
+      HTTP_LISTEN: 0.0.0.0:7410
+      AGENT_COMPOSE_RUNTIME_BASE_URL: http://agent-compose:7410
+      AGENT_COMPOSE_AUTH_TOKEN: ${AGENT_COMPOSE_AUTH_TOKEN:-}
+      DATA_ROOT: /data
+      DEFAULT_IMAGE: ${AGENT_COMPOSE_GUEST_IMAGE:-chaitin/agent-compose-guest:latest}
+      LLM_API_ENDPOINT: ${LLM_API_ENDPOINT:-https://api.openai.com}
+      LLM_API_PROTOCOL: ${LLM_API_PROTOCOL:-responses}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LLM_MODEL: ${AGENT_MODEL:-}
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${AGENT_COMPOSE_DATA_DIR:-./.data/agent-compose}:/data
+      - ./.env:/data/work/.env:ro
+    working_dir: /data/work
+    ports:
+      - "${AGENT_COMPOSE_BIND_ADDR:-127.0.0.1}:${AGENT_COMPOSE_PORT:-7410}:7410"
+    restart: unless-stopped
+
+  agent-image:
+    image: ${AGENT_IMAGE:-repo-constellation-agent:local}
+    build:
+      context: ./agents
+      args:
+        AGENT_COMPOSE_GUEST_IMAGE: ${AGENT_COMPOSE_GUEST_IMAGE:-chaitin/agent-compose-guest:latest}
+    command: ["true"]
+    profiles: ["build"]
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-github_stars}
+      POSTGRES_USER: ${POSTGRES_USER:-github_stars}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    # ports:
+    #   - "${POSTGRES_BIND_ADDR:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.15
+    environment:
+      MEILI_ENV: ${MEILI_ENV:-development}
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?set MEILI_MASTER_KEY in .env}
+      MEILI_NO_ANALYTICS: "true"
+    ports:
+      - "${MEILI_BIND_ADDR:-127.0.0.1}:${MEILI_PORT:-7700}:7700"
+    volumes:
+      - meilisearch-data:/meili_data
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:7700/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+
+  migrate:
+    image: postgres:16-alpine
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGUSER: ${POSTGRES_USER:-github_stars}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB:-github_stars}
+    volumes:
+      - ./deploy/migrations:/migrations:ro
+      - ./deploy/scripts:/scripts:ro
+    command: ["/scripts/migrate.sh"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: ./services/api
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGUSER: ${POSTGRES_USER:-github_stars}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB:-github_stars}
+      MEILISEARCH_URL: http://meilisearch:7700
+      MEILISEARCH_API_KEY: ${MEILI_MASTER_KEY}
+      MEILISEARCH_INDEX: ${MEILISEARCH_INDEX:-repositories_v1}
+      INDEXER_BATCH_SIZE: ${INDEXER_BATCH_SIZE:-100}
+      ANALYSIS_MIN_CONCURRENCY: ${ANALYSIS_MIN_CONCURRENCY:-1}
+      ANALYSIS_MAX_CONCURRENCY: ${ANALYSIS_MAX_CONCURRENCY:-4}
+      ANALYSIS_INITIAL_CONCURRENCY: ${ANALYSIS_INITIAL_CONCURRENCY:-2}
+      PLATFORM_AGENT_TOKEN: ${PLATFORM_AGENT_TOKEN:?set PLATFORM_AGENT_TOKEN in .env}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-${PLATFORM_AGENT_TOKEN}}
+      AGENT_COMPOSE_URL: ${AGENT_COMPOSE_URL:-http://agent-compose:7410}
+      AGENT_COMPOSE_AUTH_TOKEN: ${AGENT_COMPOSE_AUTH_TOKEN:-}
+      AGENT_COMPOSE_PROJECT: ${AGENT_COMPOSE_PROJECT:-repo-constellation}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "${API_BIND_ADDR:-127.0.0.1}:${API_PORT:-8080}:8080"
+    depends_on:
+      agent-compose:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      meilisearch:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8080/readyz"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./services/web
+    ports:
+      - "${WEB_BIND_ADDR:-127.0.0.1}:${WEB_PORT:-3000}:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8080/"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  meilisearch-data:

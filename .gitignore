@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+node_modules/
+star-library/
+.data/
+coverage/
+*.log
+*.pem
+*.key
+*.p12
+*.pfx
+.DS_Store
+services/*/dist/
+services/*/*.tsbuildinfo

@@ -1,0 +1,6 @@
+[
+  {
+    "query": "让 git diff 更好看的终端工具",
+    "expectedFullNames": ["dandavison/delta"]
+  }
+]

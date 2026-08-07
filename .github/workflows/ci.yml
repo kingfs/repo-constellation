@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            services/api/package-lock.json
+            services/web/package-lock.json
+      - name: Install dependencies
+        run: |
+          npm --prefix services/api ci
+          npm --prefix services/web ci
+      - name: Check agent JavaScript
+        run: |
+          node --check agents/scripts/library.cjs
+          node --check agents/scripts/sync-stars.cjs
+          node --check agents/scripts/curate-stars.cjs
+          node --check agents/scripts/control-runner.cjs
+          node --check agents/schedulers/sync-stars.js
+          node --check agents/schedulers/sync-control.js
+          node --check agents/schedulers/curate-stars.js
+      - name: Test
+        run: |
+          node --test agents/test/*.test.cjs
+          npm --prefix services/api test
+          npm --prefix services/web test
+      - name: Type-check and build
+        run: |
+          npm --prefix services/api run lint
+          npm --prefix services/api run build
+          npm --prefix services/web run lint
+          npm --prefix services/web run build
+      - name: Validate Compose
+        run: docker compose --env-file .env.example config --quiet

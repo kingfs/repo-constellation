@@ -1,0 +1,29 @@
+name: Bug report
+description: 报告可复现的问题 / Report a reproducible problem
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: textarea
+    attributes:
+      label: 问题描述 / Description
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: 复现步骤 / Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: 预期与实际行为 / Expected and actual behavior
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: 版本 / Version
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: 环境与日志 / Environment and logs
+      description: 请删除 Token、密码、私有仓库内容和其他敏感信息。
