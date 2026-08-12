@@ -11,6 +11,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: actions/configure-pages@v5
+        with:
+          # Create/enable the Pages site automatically for repositories where
+          # Pages has not been configured in the Settings UI yet.
+          enablement: true
       - uses: actions/setup-node@v5
         with: {node-version: 22}
       - uses: ruby/setup-ruby@v1
