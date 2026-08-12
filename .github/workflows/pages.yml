@@ -1,0 +1,27 @@
+name: Publish GitHub Pages
+on:
+  push: {tags: ['v*', '*.*.*']}
+  release: {types: [published]}
+  workflow_dispatch:
+permissions: {contents: read, pages: write, id-token: write}
+concurrency: {group: pages, cancel-in-progress: true}
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/configure-pages@v5
+      - uses: actions/setup-node@v5
+        with: {node-version: 22}
+      - uses: ruby/setup-ruby@v1
+        with: {ruby-version: '3.3', bundler-cache: false}
+      - run: gem install jekyll --no-document
+      - run: node scripts/build-pages.mjs && jekyll build --source .pages-src --destination _site
+      - uses: actions/upload-pages-artifact@v3
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: {name: github-pages}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

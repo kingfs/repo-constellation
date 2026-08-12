@@ -138,6 +138,10 @@ task stop
 
 ## 开发与贡献
 
+### 文档站点
+
+推送版本 tag（例如 `v1.0.0`）、发布 GitHub Release，或在 Actions 中手动运行 `Publish GitHub Pages`，都会自动生成并发布项目文档站点。站点包含 README、`docs/` 下的 Markdown 文档和故事连载；仓库内图片会复制到站点并使用相对路径，适配 GitHub Pages 的项目子路径。
+
 ```bash
 task setup:deps
 task quality:lint
