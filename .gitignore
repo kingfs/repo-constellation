@@ -13,3 +13,5 @@ coverage/
 .DS_Store
 services/*/dist/
 services/*/*.tsbuildinfo
+.pages-src/
+.pages-site/
